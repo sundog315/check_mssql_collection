@@ -264,6 +264,7 @@ class MSSQLQuery(object):
         self.modifier = modifier
     
     def run_on_connection(self, connection):
+        print 'Running query: {}'.format(self.query)
         cur = connection.cursor()
         cur.execute(self.query)
         self.query_result = cur.fetchone()[0]
