@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 ################### check_mssql_database.py ############################
-# Version    : 2.0.1
+# Version    : 2.0.2
 # Date       : 06/09/2016
 # Maintainer : Nagios Enterprises, LLC
 # Licence    : GPLv3 (http://www.fsf.org/licenses/gpl.txt)
@@ -12,6 +12,7 @@
 #   Scott Wilkerson (Nagios)
 #
 # Changelog:
+#   2.0.2 - Add ability Query multiple database in one query  --liulei
 #   2.0.1 - Fixed bug where temp file was named same as other for host and numbers were coming back bogus. (NS)
 #   2.0.0 - Complete Revamp/Rewrite based on the server version of this plugin (NS)
 #   1.3.0 - Added ability specify MSSQL instances (NS)
@@ -38,7 +39,7 @@ DIVI_QUERY = "SELECT cntr_value FROM sysperfinfo WHERE counter_name LIKE '%s%%%%
 MODES = {
     
     'logcachehit'       : { 'help'      : 'Log Cache Hit Ratio',
-                            'stdout'    : 'Log Cache Hit Ratio is %s%%',
+                            'stdout'    : 'Database %s Log Cache Hit Ratio is %s%%',
                             'label'     : 'log_cache_hit_ratio',
                             'unit'      : '%',
                             'query'     : DIVI_QUERY % 'Log Cache Hit Ratio',
@@ -47,7 +48,7 @@ MODES = {
                             },
     
     'activetrans'       : { 'help'      : 'Active Transactions',
-                            'stdout'    : 'Active Transactions is %s',
+                            'stdout'    : 'Database %s Active Transactions is %s',
                             'label'     : 'log_file_usage',
                             'unit'      : '',
                             'query'     : BASE_QUERY % 'Active Transactions',
@@ -55,14 +56,14 @@ MODES = {
                             },
     
     'logflushes'         : { 'help'      : 'Log Flushes Per Second',
-                            'stdout'    : 'Log Flushes Per Second is %s/sec',
+                            'stdout'    : 'Database %s Log Flushes Per Second is %s/sec',
                             'label'     : 'log_flushes_per_sec',
                             'query'     : BASE_QUERY % 'Log Flushes/sec',
                             'type'      : 'delta'
                             },
     
     'logfileusage'      : { 'help'      : 'Log File Usage',
-                            'stdout'    : 'Log File Usage is %s%%',
+                            'stdout'    : 'Database %s Log File Usage is %s%%',
                             'label'     : 'log_file_usage',
                             'unit'      : '%',
                             'query'     : BASE_QUERY % 'Percent Log Used',
@@ -70,35 +71,35 @@ MODES = {
                             },
     
     'transpec'          : { 'help'      : 'Transactions Per Second',
-                            'stdout'    : 'Transactions Per Second is %s/sec',
+                            'stdout'    : 'Database %s Transactions Per Second is %s/sec',
                             'label'     : 'transactions_per_sec',
                             'query'     : BASE_QUERY % 'Transactions/sec',
                             'type'      : 'delta'
                             },
     
     'loggrowths'        : { 'help'      : 'Log Growths',
-                            'stdout'    : 'Log Growths is %s',
+                            'stdout'    : 'Database %s Log Growths is %s',
                             'label'     : 'log_growths',
                             'query'     : BASE_QUERY % 'Log Growths',
                             'type'      : 'standard'
                             },
     
     'logshrinks'        : { 'help'      : 'Log Shrinks',
-                            'stdout'    : 'Log Shrinks is %s',
+                            'stdout'    : 'Database %s Log Shrinks is %s',
                             'label'     : 'log_shrinks',
                             'query'     : BASE_QUERY % 'Log Shrinks',
                             'type'      : 'standard'
                             },
     
     'logtruncs'         : { 'help'      : 'Log Truncations',
-                            'stdout'    : 'Log Truncations is %s',
+                            'stdout'    : 'Database %s Log Truncations is %s',
                             'label'     : 'log_truncations',
                             'query'     : BASE_QUERY % 'Log Truncations',
                             'type'      : 'standard'
                             },
     
     'logwait'           : { 'help'      : 'Log Flush Wait Time',
-                            'stdout'    : 'Log Flush Wait Time is %sms',
+                            'stdout'    : 'Database %s Log Flush Wait Time is %sms',
                             'label'     : 'log_wait_time',
                             'unit'      : 'ms',
                             'query'     : BASE_QUERY % 'Log Flush Wait Time',
@@ -106,7 +107,7 @@ MODES = {
                             },
     
     'datasize'          : { 'help'      : 'Database Size',
-                            'stdout'    : 'Database size is %sKB',
+                            'stdout'    : 'Database %s Database size is %sKB',
                             'label'     : 'KB',
                             'query'     : BASE_QUERY % 'Data File(s) Size (KB)',
                             'type'      : 'standard'
@@ -117,24 +118,45 @@ MODES = {
     'test'              : { 'help'      : 'Run tests of all queries against the database.' },
 }
 
-def return_nagios(options, stdout='', result='', unit='', label=''):
-    if int(options.critical) < int(options.warning):
-        invert = True
-    else:
-        invert = False
-    if is_within_range(options.critical, result, invert):
-        prefix = 'CRITICAL: '
-        code = 2
-    elif is_within_range(options.warning, result, invert):
-        prefix = 'WARNING: '
-        code = 1
-    else:
-        prefix = 'OK: '
-        code = 0
-    strresult = str(result)
-    stdout = stdout % (strresult)
-    stdout = '%s%s|%s=%s%s;%s;%s;;' % (prefix, stdout, label, strresult, unit, options.warning or '', options.critical or '')
-    raise NagiosReturn(stdout, code)
+def return_nagios(ret):
+    code = 0
+    prefix = ''
+    status = ''
+    perfdata = ''
+    
+    for res in ret:
+        options = res['options']
+        result = res['result']
+        strresult = str(res['result'])
+        stdout = res['stdout']
+        label = res['label']
+        unit = res['unit']
+        database = res['database']
+        
+        if int(options.critical) < int(options.warning):
+            invert = True
+        else:
+            invert = False
+        if is_within_range(options.critical, result, invert):
+            if code < 2:
+                prefix = 'CRITICAL: '
+                code = 2
+        elif is_within_range(options.warning, result, invert):
+            if code < 1:
+                prefix = 'WARNING: '
+                code = 1
+        else:
+            if code == 0:
+                prefix = 'OK: '
+
+        strresult = str(result)
+        stdout = stdout % (database, strresult)
+        status = status + ' ' + stdout
+        perfdata = perfdata + '%s_%s=%s%s;%s;%s;; ' % (database, label, strresult, unit, options.warning or '', options.critical or '')
+
+    status = '%s%s' % (prefix, status)
+    status = '%s|%s' % (status, perfdata)
+    raise NagiosReturn(status, code)
 
 class NagiosReturn(Exception):
     
@@ -144,14 +166,15 @@ class NagiosReturn(Exception):
 
 class MSSQLQuery(object):
     
-    def __init__(self, query, options, label='', unit='', stdout='', host='', modifier=1, *args, **kwargs):
-        self.query = query % options.table
+    def __init__(self, query, options, database, label='', unit='', stdout='', host='', modifier=1, *args, **kwargs):
+        self.query = query % database
         self.label = label
         self.unit = unit
         self.stdout = stdout
         self.options = options
         self.host = host
         self.modifier = modifier
+        self.database = database
     
     def run_on_connection(self, connection):
         cur = connection.cursor()
@@ -159,11 +182,8 @@ class MSSQLQuery(object):
         self.query_result = cur.fetchone()[0]
     
     def finish(self):
-        return_nagios(  self.options,
-                        self.stdout,
-                        self.result,
-                        self.unit,
-                        self.label )
+        ret = {"stdout": self.stdout, "result": self.result, "unit": self.unit, "label": self.label, "options": self.options, "database": self.database}
+        return ret
     
     def calculate_result(self):
         self.result = float(self.query_result) * self.modifier
@@ -171,7 +191,7 @@ class MSSQLQuery(object):
     def do(self, connection):
         self.run_on_connection(connection)
         self.calculate_result()
-        self.finish()
+        return self.finish()
 
 class MSSQLDivideQuery(MSSQLQuery):
     
@@ -187,7 +207,7 @@ class MSSQLDeltaQuery(MSSQLQuery):
     
     def make_pickle_name(self):
         tmpdir = tempfile.gettempdir()
-        tmpname = hash(self.host + self.table + self.query)
+        tmpname = hash(self.host + self.database + self.query)
         self.picklename = '%s/mssql-%s.tmp' % (tmpdir, tmpname)
     
     def calculate_result(self):
@@ -245,14 +265,14 @@ def is_within_range(nagstring, value, invert = False):
     raise Exception('Improper warning/critical format.')
 
 def parse_args():
-    usage = "usage: %prog -H hostname -U user -P password -T table --mode"
+    usage = "usage: %prog -H hostname -U user -P password -D databases --mode"
     parser = OptionParser(usage=usage)
     
     required = OptionGroup(parser, "Required Options")
     required.add_option('-H', '--hostname', help='Specify MSSQL Server Address', default=None)
     required.add_option('-U', '--user', help='Specify MSSQL User Name', default=None)
     required.add_option('-P', '--password', help='Specify MSSQL Password', default=None)
-    required.add_option('-T', '--table', help='Specify the table to check', default=None) 
+    required.add_option('-D', '--databases', help='Specify the databases to check', default=None) 
     parser.add_option_group(required)
     
     connection = OptionGroup(parser, "Optional Connection Information")
@@ -278,8 +298,8 @@ def parse_args():
         parser.error('User is a required option.')
     if not options.password:
         parser.error('Password is a required option.')
-    if not options.table:
-        parser.error('Table is a required option.')
+    if not options.databases:
+        parser.error('Databases is a required option.')
     
     if options.instance and options.port:
         parser.error('Cannot specify both instance and port.')
@@ -300,32 +320,34 @@ def connect_db(options):
     elif options.port:
         host += ":" + options.port
     start = time.time()
-    mssql = pymssql.connect(host = host, user = options.user, password = options.password, database=options.table)
+    mssql = pymssql.connect(host = host, user = options.user, password = options.password, database='master')
     total = time.time() - start
     return mssql, total, host
 
 def main():
     options = parse_args()
     
+    dbs = options.databases.split(",")
+    ret = []
     mssql, total, host = connect_db(options)
-    
+
     if options.mode =='test':
-        run_tests(mssql, options, host)
+        run_tests(mssql, options, host, db)
         
     elif not options.mode or options.mode == 'time2connect':
-        return_nagios(  options,
-                        stdout='Time to connect was %ss',
-                        label='time',
-                        unit='s',
-                        result=total )
-                        
+        data = {"stdout": 'Database %s Time to connect was %ss', "result": total, "unit": 's', "label": 'time', "options": options, "database": "_Total"}
+        ret.append(data)
     else:
-        execute_query(mssql, options, host)
+        for db in dbs:
+            ret.append(execute_query(mssql, options, db, host))
+    
+    return_nagios(ret)
 
-def execute_query(mssql, options, host=''):
+def execute_query(mssql, options, db, host=''):
     sql_query = MODES[options.mode]
     sql_query['options'] = options
     sql_query['host'] = host
+    sql_query['database'] = db
     query_type = sql_query.get('type')
     if query_type == 'delta':
         mssql_query = MSSQLDeltaQuery(**sql_query)
@@ -333,9 +355,9 @@ def execute_query(mssql, options, host=''):
         mssql_query = MSSQLDivideQuery(**sql_query)
     else:
         mssql_query = MSSQLQuery(**sql_query)
-    mssql_query.do(mssql)
+    return mssql_query.do(mssql)
 
-def run_tests(mssql, options, host):
+def run_tests(mssql, options, host, db):
     failed = 0
     total  = 0
     del MODES['time2connect']
@@ -344,7 +366,7 @@ def run_tests(mssql, options, host):
         total += 1
         options.mode = mode
         try:
-            execute_query(mssql, options, host)
+            execute_query(mssql, options, host, db)
         except NagiosReturn:
             print "%s passed!" % mode
         except Exception, e:
@@ -364,8 +386,5 @@ if __name__ == '__main__':
     except NagiosReturn, e:
         print e.message
         sys.exit(e.code)
-    except Exception, e:
-        print type(e)
-        print "Caught unexpected error. This could be caused by your sysperfinfo not containing the proper entries for this query, and you may delete this service check."
-        sys.exit(3)
+
 
